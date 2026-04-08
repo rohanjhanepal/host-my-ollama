@@ -1,45 +1,30 @@
 # Ollama Qwen Tunnel
 
-A small FastAPI gateway that sits in front of a local Ollama instance and exposes:
+A FastAPI gateway that acts as a secure gatekeeper for a local Ollama instance. It adds API key authentication, a browser chat UI, streaming responses, and a simple API discovery endpoint so you can safely expose your home-hosted `qwen2.5:7b` model through Cloudflare Tunnel.
 
-- a protected chat API
-- a streaming chat API for live UI responses
-- a simple browser chat UI
-- a discovery endpoint that lists the available APIs and their request/response formats
-
-This project currently proxies requests to Ollama's `generate` API at `http://localhost:11434/api/generate` and uses the `qwen2.5:7b` model.
+This project currently proxies requests to Ollama's `generate` API at `http://localhost:11434/api/generate`, serves FastAPI on `http://0.0.0.0:5002`, and is set up to be published at `https://qwen.rohanjha.com.np`.
 
 ## Features
 
 - API key protection using the `X-API-Key` header
-- Web UI at `/ui`
-- Non-streaming chat endpoint
-- Streaming SSE chat endpoint
-- API catalog endpoint for integration discovery
-- Static HTML/CSS UI served by FastAPI
+- Browser chat UI at `/ui` and `/v1/ui`
+- Standard JSON chat endpoint at `/v1/chat`
+- Streaming SSE chat endpoint at `/v1/chat/stream`
+- API catalog endpoint at `/v1/info` and `/v1/apis`
+- WAN-friendly deployment via Cloudflare Tunnel
+- Headless process management with PM2
 
 ## Requirements
 
 - Python 3.10+
-- Ollama installed and running locally
-- The target Ollama model pulled locally
-
-Example:
-
-```powershell
-ollama pull qwen2.5:7b
-ollama serve
-```
+- Ollama installed locally
+- `qwen2.5:7b` pulled in Ollama
+- Node.js and npm for PM2
+- `cloudflared` installed for tunnel access
 
 ## Setup
 
-1. Clone the repository.
-2. Create a virtual environment.
-3. Install the Python dependencies.
-4. Create your `.env` file.
-5. Start the server.
-
-### 1. Create a virtual environment
+### 1. Create and activate a virtual environment
 
 ```powershell
 python -m venv .venv
@@ -54,144 +39,212 @@ pip install -r requirements.txt
 
 ### 3. Configure environment variables
 
-Copy `.env.example` to `.env` and set your own key:
+Create a `.env` file in the project root:
 
 ```env
-API_KEY=your_secure_api_key_here
+API_KEY=your_super_secure_key_here
 ```
 
-## Run the app
+You can also copy from `.env.example` and update the value.
+
+### 4. Prepare Ollama
+
+```powershell
+ollama pull qwen2.5:7b
+ollama serve
+```
+
+## Local Run
+
+To run the gateway directly:
 
 ```powershell
 py -3 main.py
 ```
 
-The server starts on:
+The FastAPI app listens on:
 
 ```text
-http://localhost:8000
+http://localhost:5002
 ```
 
-## Available Endpoints
+## Running In The Background With PM2
 
-### UI
+To keep the gateway running without an open terminal window:
 
-- `GET /ui`
-- `GET /v1/ui`
-
-Opens the browser chat UI. The page asks for your API key and stores it in local storage for chat requests.
-
-### API catalog
-
-- `GET /v1/apis`
-- `GET /v1/info`
-
-Returns a JSON summary of the available endpoints, auth requirements, and request/response shapes.
-
-Example:
+### 1. Install PM2
 
 ```powershell
-curl http://localhost:8000/v1/info
+npm install -g pm2
 ```
 
-### Chat
+### 2. Start the gateway
 
-- `POST /v1/chat`
+```powershell
+pm2 start main.py --interpreter python --name "qwen-gateway"
+```
 
-Headers:
+### 3. Save the PM2 process list
+
+```powershell
+pm2 save
+```
+
+Useful PM2 commands:
+
+```powershell
+pm2 list
+pm2 logs qwen-gateway
+pm2 restart qwen-gateway
+pm2 stop qwen-gateway
+```
+
+## Cloudflare Tunnel Setup
+
+This project is configured to expose the gateway at:
+
+```text
+https://qwen.rohanjha.com.np
+```
+
+The current tunnel routing points that hostname to:
+
+```text
+http://localhost:5002
+```
+
+### 1. Create and route the tunnel
+
+```powershell
+cloudflared tunnel login
+cloudflared tunnel create qwen-tunnel
+cloudflared tunnel route dns qwen-tunnel qwen.rohanjha.com.np
+```
+
+### 2. Example `config.yml`
+
+Your working tunnel config matches this pattern:
+
+```yaml
+tunnel: <your-tunnel-id>
+credentials-file: C:\Users\RJ\.cloudflared\<your-tunnel-id>.json
+
+ingress:
+  - hostname: qwen.rohanjha.com.np
+    service: http://localhost:5002
+  - service: http_status:404
+```
+
+### 3. Install the tunnel as a Windows service
+
+For `cloudflared service install`, make sure the service account can see the config and credentials. On Windows that usually means placing `config.yml` and the tunnel credentials JSON under:
+
+```text
+C:\Windows\System32\config\systemprofile\.cloudflared\
+```
+
+Then install and start the service:
+
+```powershell
+cloudflared service install
+sc start cloudflared
+```
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/ui` | `GET` | Browser chat interface |
+| `/v1/ui` | `GET` | Alias for the browser chat interface |
+| `/v1/info` | `GET` | API catalog and request/response shapes |
+| `/v1/apis` | `GET` | Alias for the API catalog |
+| `/v1/chat` | `POST` | Standard JSON chat response |
+| `/v1/chat/stream` | `POST` | SSE streaming chat response |
+
+## API Usage
+
+### Authentication
+
+Protected endpoints require:
 
 ```http
-X-API-Key: your_secure_api_key_here
-Content-Type: application/json
+X-API-Key: your_super_secure_key_here
 ```
 
-Request body:
+### Request format
+
+Both chat endpoints expect:
 
 ```json
 {
-  "prompt": "Write a short poem about the ocean."
+  "prompt": "Hello Qwen!"
 }
 ```
 
-Response:
+### `POST /v1/chat`
+
+Returns a regular JSON response from Ollama's `generate` API.
+
+Example:
+
+```bash
+curl -X POST https://qwen.rohanjha.com.np/v1/chat \
+  -H "X-API-Key: your_super_secure_key_here" \
+  -H "Content-Type: application/json" \
+  -d "{\"prompt\":\"Hello Qwen!\"}"
+```
+
+Typical response:
 
 ```json
 {
   "model": "qwen2.5:7b",
   "created_at": "2026-04-08T10:00:00Z",
-  "response": "The ocean whispers...",
+  "response": "Hello! How can I help?",
   "done": true
 }
 ```
 
-Note: the exact JSON fields come from Ollama's `/api/generate` response.
+### `POST /v1/chat/stream`
 
-### Streaming chat
+Returns `text/event-stream` and emits incremental response chunks.
 
-- `POST /v1/chat/stream`
-
-Headers:
-
-```http
-X-API-Key: your_secure_api_key_here
-Content-Type: application/json
-Accept: text/event-stream
-```
-
-Request body:
-
-```json
-{
-  "prompt": "Explain photosynthesis simply."
-}
-```
-
-Response type:
+Example event stream:
 
 ```text
-text/event-stream
-```
+data: {"text":"Hello "}
 
-Example stream events:
-
-```text
-data: {"text":"Photo"}
-
-data: {"text":"synthesis "}
+data: {"text":"from Qwen"}
 
 event: done
 data: {}
 ```
 
-## Example Requests
+### `GET /v1/info`
 
-### PowerShell
+Returns a machine-readable catalog of available endpoints and their request/response formats.
+
+Example:
 
 ```powershell
-$headers = @{
-  "X-API-Key" = "your_secure_api_key_here"
-  "Content-Type" = "application/json"
-}
-
-$body = @{
-  prompt = "Tell me a fun fact about Saturn."
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://localhost:8000/v1/chat" `
-  -Headers $headers `
-  -Body $body
+curl https://qwen.rohanjha.com.np/v1/info
 ```
 
-### cURL
+## Web UI
 
-```bash
-curl -X POST http://localhost:8000/v1/chat \
-  -H "X-API-Key: your_secure_api_key_here" \
-  -H "Content-Type: application/json" \
-  -d "{\"prompt\":\"Hello from curl\"}"
+Open the browser UI at:
+
+```text
+https://qwen.rohanjha.com.np/ui
 ```
+
+or locally:
+
+```text
+http://localhost:5002/ui
+```
+
+The UI will prompt for your API key and store it in browser local storage for subsequent chat requests.
 
 ## Project Structure
 
@@ -211,24 +264,45 @@ curl -X POST http://localhost:8000/v1/chat \
 
 ## Configuration Notes
 
-These values are currently defined directly in `main.py`:
+These values are currently set in [`main.py`](main.py):
 
 - `OLLAMA_URL = "http://localhost:11434/api/generate"`
 - `MODEL_NAME = "qwen2.5:7b"`
+- FastAPI host: `0.0.0.0`
+- FastAPI port: `5002`
 
-If you want to point to a different Ollama host or model, update those values in [`main.py`](main.py).
+If you want to change the Ollama host, model, or public port target, update those values and your Cloudflare tunnel config together.
 
 ## Security Notes
 
+- Keep Ollama bound to localhost and do not expose it directly to the internet.
 - Do not commit your real `.env` file.
-- Use a strong API key before exposing this app outside your local machine.
-- The UI stores the API key in browser local storage for convenience.
+- Use a strong API key before exposing this gateway publicly.
+- The browser UI stores the API key in local storage for convenience.
+- Cloudflare Tunnel usually removes the need to open inbound router ports.
 
 ## Troubleshooting
 
-### `403 Unauthorized`
+### Cloudflare `1033`
 
-- Make sure the `X-API-Key` header matches the value in `.env`.
+The tunnel service is down or unreachable. Try:
+
+```powershell
+sc start cloudflared
+```
+
+### `502 Bad Gateway`
+
+The tunnel is up, but the FastAPI app is not responding. Check PM2:
+
+```powershell
+pm2 restart qwen-gateway
+pm2 logs qwen-gateway
+```
+
+### `403 Forbidden`
+
+The supplied `X-API-Key` does not match the value in `.env`.
 
 ### `500 Ollama Error`
 
@@ -236,13 +310,13 @@ If you want to point to a different Ollama host or model, update those values in
 - Confirm `qwen2.5:7b` is installed locally.
 - Confirm Ollama is reachable at `http://localhost:11434`.
 
-### UI loads but responses do not work
+### UI loads but replies do not stream
 
-- Check that Ollama is running.
-- Hard refresh the browser so the newest UI JavaScript is loaded.
-- Confirm the API key was entered correctly in the UI.
+- Hard refresh the browser to pick up the latest UI JavaScript.
+- Check PM2 logs for the FastAPI process.
+- Confirm Ollama is generating responses locally.
 
-## Next improvements
+## Next Improvements
 
 - Move `OLLAMA_URL` and `MODEL_NAME` into environment variables
 - Add a `pyproject.toml`
