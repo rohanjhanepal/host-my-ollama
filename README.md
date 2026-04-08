@@ -42,14 +42,14 @@ ollama serve
 ### 1. Create a virtual environment
 
 ```powershell
-py -3 -m venv .venv
+python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
 ### 2. Install dependencies
 
 ```powershell
-pip install fastapi uvicorn requests python-dotenv
+pip install -r requirements.txt
 ```
 
 ### 3. Configure environment variables
@@ -201,6 +201,7 @@ curl -X POST http://localhost:8000/v1/chat \
 |-- .env
 |-- .env.example
 |-- .gitignore
+|-- requirements.txt
 |-- README.md
 `-- ui
     |-- index.html
@@ -244,6 +245,6 @@ If you want to point to a different Ollama host or model, update those values in
 ## Next improvements
 
 - Move `OLLAMA_URL` and `MODEL_NAME` into environment variables
-- Add a `requirements.txt` or `pyproject.toml`
+- Add a `pyproject.toml`
 - Add request logging and health checks
 - Add tests for the chat and streaming endpoints
